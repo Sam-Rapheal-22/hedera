@@ -53,10 +53,15 @@ export async function fetchHBARData() {
 
 // Fetch crypto news sentiment
 export async function fetchSentimentData() {
+  // If the user hasn't configured a real API key yet, skip the request to avoid a 404 error
+  if (!process.env.CRYPTOPANIC_API_KEY || process.env.CRYPTOPANIC_API_KEY === 'your_cryptopanic_api_key_here') {
+    return generateSimulatedSentiment();
+  }
+
   try {
     const res = await axios.get('https://cryptopanic.com/api/v1/posts/', {
       params: {
-        auth_token: process.env.CRYPTOPANIC_API_KEY || 'demo',
+        auth_token: process.env.CRYPTOPANIC_API_KEY,
         currencies: 'HBAR',
         public: true,
         kind: 'news',

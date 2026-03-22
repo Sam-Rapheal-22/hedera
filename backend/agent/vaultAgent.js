@@ -1,5 +1,5 @@
-// AI Agent - LangChain + OpenAI powered DeFi Keeper
-import { ChatOpenAI } from '@langchain/openai';
+// AI Agent - LangChain + Gemini powered DeFi Keeper
+import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import { HumanMessage, SystemMessage, AIMessage } from '@langchain/core/messages';
 import {
   executeHarvest,
@@ -41,11 +41,11 @@ let agentState = {
 let llm = null;
 
 function getLLM() {
-  if (!llm && process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'your_openai_api_key_here') {
-    llm = new ChatOpenAI({
-      modelName: 'gpt-4o-mini',
+  if (!llm && process.env.GEMINI_API_KEY) {
+    llm = new ChatGoogleGenerativeAI({
+      model: 'gemini-1.5-flash',
       temperature: 0.3,
-      openAIApiKey: process.env.OPENAI_API_KEY,
+      apiKey: process.env.GEMINI_API_KEY,
     });
   }
   return llm;

@@ -11,6 +11,7 @@ import TransactionLog from "@/components/TransactionLog";
 import ChatInterface from "@/components/ChatInterface";
 import SentimentPanel from "@/components/SentimentPanel";
 import ToastContainer from "@/components/ToastContainer";
+import LandingPage from "@/components/LandingPage";
 
 const API = "http://localhost:4000";
 const WS_URL = "ws://localhost:4000";
@@ -25,7 +26,41 @@ function useStore() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [toasts, setToasts] = useState<any[]>([]);
   const [simulating, setSimulating] = useState(false);
+  const [wallet, setWallet] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
+
+  const handleConnect = async () => {
+    setConnecting(true);
+    let success = false;
+    try {
+      if (typeof window !== "undefined" && (window as any).ethereum) {
+        const accounts = await (window as any).ethereum.request({ method: "eth_requestAccounts" });
+        if (accounts && accounts.length > 0) {
+          const address = accounts[0];
+          setWallet(`${address.slice(0, 6)}...${address.slice(-4)}`);
+          success = true;
+        }
+      } else {
+        alert("MetaMask is not installed! Please install the MetaMask extension to continue.");
+      }
+    } catch (error: any) {
+      const errCode = error?.code;
+      const errMsg = error?.message;
+      console.error("MetaMask connection failed:", { code: errCode, message: errMsg, fullError: error });
+      
+      if (errCode === 4001) {
+        alert("You cancelled the MetaMask connection request.");
+      } else if (errCode === -32002) {
+        alert("A MetaMask request is already pending. Please open the extension to approve it.");
+      } else {
+        alert(`MetaMask connection error: ${errMsg || "Unknown error occurred"}`);
+      }
+    } finally {
+      setConnecting(false);
+    }
+    return success;
+  };
 
   const addToast = useCallback((msg: string, type: "success" | "error" | "info" = "info") => {
     const id = Date.now();
@@ -50,9 +85,11 @@ function useStore() {
         if (v.success) setVaults(v.data.vaults || []);
         if (t.success) setTransactions(t.data);
         if (a.success) setAgentState(a.data);
-      } catch (e) {
+      } catch (e: any) {
         console.error("Initial fetch failed:", e);
-        addToast("Backend not connected — using demo mode", "info");
+        const detail = e.message || "";
+        addToast(`Backend offline: ${detail}`, "error");
+        addToast("Using offline demo mode", "info");
       }
     };
     load();
@@ -124,12 +161,17 @@ function useStore() {
     setSimulating(false);
   };
 
-  return { market, sentiment, vaults, agentState, transactions, isAnalyzing, activeTab, setActiveTab, toasts, simulating, triggerAnalysis, toggleAgent, runSimulation };
+  return { market, sentiment, vaults, agentState, transactions, isAnalyzing, activeTab, setActiveTab, toasts, simulating, triggerAnalysis, toggleAgent, runSimulation, wallet, setWallet, connecting, handleConnect };
 }
 
 export default function App() {
+  const [entered, setEntered] = useState(false);
   const store = useStore();
-  const { market, sentiment, vaults, agentState, transactions, isAnalyzing, activeTab, setActiveTab, toasts, simulating, triggerAnalysis, toggleAgent, runSimulation } = store;
+  const { market, sentiment, vaults, agentState, transactions, isAnalyzing, activeTab, setActiveTab, toasts, simulating, triggerAnalysis, toggleAgent, runSimulation, wallet, setWallet, connecting, handleConnect } = store;
+
+  if (!entered) {
+    return <LandingPage onEnter={() => setEntered(true)} handleConnect={handleConnect} connecting={connecting} />;
+  }
 
   return (
     <>
@@ -138,7 +180,7 @@ export default function App() {
       <div className="app-layout" style={{ position: "relative", zIndex: 1 }}>
         <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} agentState={agentState} toggleAgent={toggleAgent} />
         <main className="app-main">
-          <Header market={market} agentState={agentState} isAnalyzing={isAnalyzing} triggerAnalysis={triggerAnalysis} />
+          <Header market={market} agentState={agentState} isAnalyzing={isAnalyzing} triggerAnalysis={triggerAnalysis} wallet={wallet} setWallet={setWallet} connecting={connecting} handleConnect={handleConnect} />
           <div className="page-container">
 
             {activeTab === "dashboard" && (
