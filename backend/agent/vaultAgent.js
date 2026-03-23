@@ -53,9 +53,14 @@ function getLLM() {
 
 // Core AI analysis function
 export async function analyzeAndDecide(marketData, sentimentData, vaultData) {
-  const { price, change24h, volatility, volatilityLevel } = marketData;
-  const { label: sentimentLabel, score: sentimentScore } = sentimentData;
-  const vault = vaultData.vaults[0];
+  const { price, change24h, volatility, volatilityLevel } = marketData || {};
+  const { label: sentimentLabel, score: sentimentScore } = sentimentData || {};
+  const vaults = vaultData?.vaults ?? [];
+  const vault = vaults[0] ?? null; // may be null if no wallet connected
+
+  const vaultSection = vault
+    ? `\nActive Holding - ${vault.name}:\n- Balance: ${vault.humanBalance?.toLocaleString() ?? 'N/A'} ${vault.asset ?? ''}\n- USD Value: ${vault.usdValue != null ? '$' + vault.usdValue.toFixed(2) : 'N/A'}\n- Protocol: ${vault.protocol ?? 'N/A'}`
+    : '\nNo wallet connected — analysis is market-data only.';
 
   const contextMessage = `
 Current Market Snapshot:
@@ -63,13 +68,7 @@ Current Market Snapshot:
 - 24h Change: ${change24h?.toFixed(2) || 'N/A'}%
 - Volatility: ${volatility?.toFixed(2) || 'N/A'}% (${volatilityLevel})
 - Sentiment: ${sentimentLabel} (score: ${sentimentScore?.toFixed(2) || 'N/A'})
-
-Active Vault - ${vault.name}:
-- TVL: $${vault.tvl?.toLocaleString() || 'N/A'}
-- APY: ${vault.apy?.toFixed(2) || 'N/A'}%
-- Pending Rewards: $${vault.pendingRewards?.toFixed(2) || 'N/A'}
-- In Liquidity Range: ${vault.inRange ? 'YES' : 'NO ⚠️'}
-- Utilization Rate: ${(vault.utilizationRate * 100)?.toFixed(1) || 'N/A'}%
+${vaultSection}
 
 What is your analysis and recommended action?`;
 
@@ -86,41 +85,49 @@ What is your analysis and recommended action?`;
       const response = await model.invoke(messages);
       reasoning = response.content;
     } catch (err) {
-      console.error('[Agent] OpenAI error:', err.message);
+      console.error('[Agent] Gemini error:', err.message);
       reasoning = generateFallbackReasoning(volatilityLevel, sentimentLabel, vault);
     }
   } else {
     reasoning = generateFallbackReasoning(volatilityLevel, sentimentLabel, vault);
   }
 
-  // Determine action from conditions
-  ({ action, actionType, actionParams } = determineAction(
-    volatilityLevel,
-    sentimentLabel,
-    vault,
-    vault.pendingRewards
-  ));
+  // Determine action — only execute if we have real vault/wallet data
+  if (vault) {
+    ({ action, actionType, actionParams } = determineAction(
+      volatilityLevel,
+      sentimentLabel,
+      vault,
+      vault.pendingRewards ?? 0,
+    ));
+  } else {
+    action = 'Monitoring market — no wallet connected';
+    actionType = 'MONITOR';
+    actionParams = {};
+  }
 
-  // Execute action on Hedera
+  // Execute action on Hedera only if vault data is real
   let txResult = null;
-  try {
-    txResult = await executeAction(actionType, vault.id, actionParams);
-  } catch (err) {
-    console.error('[Agent] Action execution error:', err.message);
+  if (vault && actionType !== 'MONITOR') {
+    try {
+      txResult = await executeAction(actionType, vault.id, actionParams);
+    } catch (err) {
+      console.error('[Agent] Action execution error:', err.message);
+    }
   }
 
   const decision = {
     id: Date.now(),
     timestamp: new Date().toISOString(),
     marketContext: { price, change24h, volatility, volatilityLevel, sentimentLabel, sentimentScore },
-    vaultId: vault.id,
-    vaultName: vault.name,
+    vaultId: vault?.id ?? null,
+    vaultName: vault?.name ?? null,
     reasoning,
     action,
     actionType,
     actionParams,
     transaction: txResult,
-    status: txResult ? 'EXECUTED' : 'SIMULATED',
+    status: txResult ? 'EXECUTED' : 'ANALYSED',
   };
 
   agentState.lastDecision = decision;
@@ -129,6 +136,7 @@ What is your analysis and recommended action?`;
 
   return decision;
 }
+
 
 // Chat interface
 export async function chat(userMessage, marketData, sentimentData) {
@@ -228,6 +236,9 @@ async function executeAction(actionType, vaultId, params) {
 }
 
 function generateFallbackReasoning(volatilityLevel, sentimentLabel, vault) {
+  if (!vault) {
+    return `📊 Analysis | No wallet connected. HBAR market shows ${volatilityLevel?.toLowerCase() ?? 'unknown'} volatility with ${sentimentLabel?.toLowerCase() ?? 'neutral'} sentiment.\n\n🧠 Decision | Unable to execute vault actions without a connected wallet. Connect your HashPack wallet to enable AI-driven position management.\n\n⚡ Action | Monitoring only — connect a wallet to unlock autonomous execution.`;
+  }
   const inRange = vault.inRange;
   if (!inRange) {
     return `📊 Analysis | HBAR liquidity position has drifted out of range — this means the vault is earning zero fees and accumulating impermanent loss risk.\n\n🧠 Decision | Immediate rebalancing is required to restore fee generation. Market conditions are secondary to this critical operational issue.\n\n⚡ Action | Executing rebalance transaction to center liquidity around current price with ±10% buffer range.`;
@@ -238,8 +249,9 @@ function generateFallbackReasoning(volatilityLevel, sentimentLabel, vault) {
   if (volatilityLevel === 'LOW' && sentimentLabel === 'BULLISH') {
     return `📊 Analysis | Low volatility with bullish sentiment — ideal conditions for concentrated liquidity strategies. The current APY of ${vault.apy?.toFixed(1)}% can be optimized.\n\n🧠 Decision | Tightening the liquidity range from ±15% to ±8% around the current price will 2x the fee concentration, capturing more of the trading volume.\n\n⚡ Action | Rebalancing to a tighter range to maximize capital efficiency and fee generation during this stable period.`;
   }
-  return `📊 Analysis | Market conditions are ${volatilityLevel.toLowerCase()} volatility with ${sentimentLabel.toLowerCase()} sentiment. Vault is operating within parameters with $${vault.pendingRewards?.toFixed(2)} in pending rewards.\n\n🧠 Decision | No immediate risk factors detected. ${vault.pendingRewards > 1000 ? 'Pending rewards above $1000 threshold — harvesting is optimal now.' : 'Rewards below harvest threshold, continuing to accumulate.'}\n\n⚡ Action | ${vault.pendingRewards > 1000 ? 'Executing harvest transaction.' : 'Continuing to monitor. Next check in 30 minutes.'}`;
+  return `📊 Analysis | Market conditions are ${volatilityLevel?.toLowerCase()} volatility with ${sentimentLabel?.toLowerCase()} sentiment. Vault is operating within parameters with $${vault.pendingRewards?.toFixed(2)} in pending rewards.\n\n🧠 Decision | No immediate risk factors detected. ${vault.pendingRewards > 1000 ? 'Pending rewards above $1000 threshold — harvesting is optimal now.' : 'Rewards below harvest threshold, continuing to accumulate.'}\n\n⚡ Action | ${vault.pendingRewards > 1000 ? 'Executing harvest transaction.' : 'Continuing to monitor. Next check in 30 minutes.'}`;
 }
+
 
 function generateFallbackChatResponse(msg, marketData, sentimentData) {
   const lower = msg.toLowerCase();

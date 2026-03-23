@@ -1,0 +1,13 @@
+{
+	"servers": {
+		"HashPack Docs": {
+			"url": "https://docs.hashpack.app/~gitbook/mcp",
+			"type": "http"
+		},
+		"Hedera": {
+			"url": "https://docs.hedera.com/mcp",
+			"type": "http"
+		}
+	},
+	"inputs": []
+}

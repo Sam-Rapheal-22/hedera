@@ -1,9 +1,21 @@
 "use client";
 import { useState } from "react";
+import { LogOut } from "lucide-react";
 
 export default function Header({ market, agentState, isAnalyzing, triggerAnalysis, wallet, setWallet, connecting, handleConnect }: any) {
   const price = market?.price;
   const change = market?.change24h;
+  const [disconnecting, setDisconnecting] = useState(false);
+
+  const handleLogout = async () => {
+    setDisconnecting(true);
+    try {
+      // setWallet is now async (calls wallet_revokePermissions)
+      await setWallet();
+    } finally {
+      setDisconnecting(false);
+    }
+  };
 
   return (
     <header className="app-header">
@@ -28,8 +40,8 @@ export default function Header({ market, agentState, isAnalyzing, triggerAnalysi
             {market.volatilityLevel} VOL
           </span>
         )}
-        {market?.simulated && (
-          <span className="badge badge-purple">SIM</span>
+        {market?.rateLimited && (
+          <span className="badge badge-yellow" title="CoinGecko rate-limited — using cached estimate">CACHED</span>
         )}
       </div>
 
@@ -56,24 +68,50 @@ export default function Header({ market, agentState, isAnalyzing, triggerAnalysi
 
         {wallet ? (
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2" style={{ padding: "6px 14px", background: "rgba(0, 214, 143, 0.1)", border: "1px solid rgba(0, 214, 143, 0.3)", borderRadius: 8 }}>
+            {/* Wallet address pill */}
+            <div
+              className="flex items-center gap-2"
+              style={{
+                padding: "6px 14px",
+                background: "rgba(0, 214, 143, 0.1)",
+                border: "1px solid rgba(0, 214, 143, 0.3)",
+                borderRadius: 8,
+              }}
+            >
               <span style={{ fontSize: 12 }}>👛</span>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 600, color: "var(--accent-green)" }}>
                 {wallet}
               </span>
             </div>
-            <button 
-              className="btn btn-sm" 
-              onClick={() => setWallet(null)} 
-              style={{ background: "rgba(255, 60, 60, 0.1)", color: "#ff4d4d", borderColor: "rgba(255, 60, 60, 0.3)", padding: "6px 10px" }}
-              title="Disconnect Wallet"
+
+            {/* Logout — revokes MetaMask permissions */}
+            <button
+              className="btn btn-sm"
+              onClick={handleLogout}
+              disabled={disconnecting}
+              title="Disconnect wallet from this site"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                background: "rgba(255, 60, 60, 0.08)",
+                color: disconnecting ? "#666" : "#ff4d4d",
+                borderColor: "rgba(255, 60, 60, 0.25)",
+                padding: "6px 12px",
+                transition: "opacity 0.2s",
+                opacity: disconnecting ? 0.6 : 1,
+              }}
             >
-              Logout
+              {disconnecting ? (
+                <><span className="spinner" style={{ width: 13, height: 13, borderTopColor: "#ff4d4d" }} /> Disconnecting…</>
+              ) : (
+                <><LogOut size={13} /> Logout</>
+              )}
             </button>
           </div>
         ) : (
-          <button 
-            className="btn btn-secondary btn-sm" 
+          <button
+            className="btn btn-secondary btn-sm"
             onClick={handleConnect}
             disabled={connecting}
             style={{ borderColor: "rgba(108, 99, 255, 0.4)" }}

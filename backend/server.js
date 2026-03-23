@@ -5,9 +5,9 @@ import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import cron from 'node-cron';
 
-import { fetchHBARData, fetchSentimentData, generateVaultData } from './services/marketService.js';
+import { fetchHBARData, fetchSentimentData } from './services/marketService.js';
+import { fetchWalletVaultPositions, fetchWalletTransactions } from './services/hederaWalletService.js';
 import { analyzeAndDecide, chat, getAgentState, setAgentRunning } from './agent/vaultAgent.js';
-import { getTransactionLog } from './services/hederaService.js';
 
 const app = express();
 const server = createServer(app);
@@ -19,7 +19,10 @@ app.use(express.json());
 // In-memory state
 let latestMarketData = null;
 let latestSentimentData = null;
-let latestVaultData = null;
+
+// Per-wallet vault cache: { [accountId]: { data, ts } }
+const walletVaultCache = new Map();
+const VAULT_CACHE_TTL_MS = 30_000; // 30 seconds
 
 // Broadcast to all WebSocket clients
 function broadcast(type, data) {
@@ -54,15 +57,45 @@ app.get('/api/sentiment', async (_, res) => {
   }
 });
 
-// Vault data
-app.get('/api/vaults', (_, res) => {
-  latestVaultData = generateVaultData();
-  res.json({ success: true, data: latestVaultData });
+// Vault / wallet positions — requires ?wallet=<accountIdOrEvmAddress>
+app.get('/api/vaults', async (req, res) => {
+  const { wallet } = req.query;
+
+  if (!wallet) {
+    return res.json({ success: true, data: { vaults: [], walletData: null, message: 'No wallet connected' } });
+  }
+
+  // Serve from cache if fresh
+  const cached = walletVaultCache.get(wallet);
+  if (cached && Date.now() - cached.ts < VAULT_CACHE_TTL_MS) {
+    return res.json({ success: true, data: cached.data, cached: true });
+  }
+
+  try {
+    const data = await fetchWalletVaultPositions(wallet, latestMarketData?.price ?? null);
+    walletVaultCache.set(wallet, { data, ts: Date.now() });
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error('[API] /api/vaults error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
-// Transaction history
-app.get('/api/transactions', (_, res) => {
-  res.json({ success: true, data: getTransactionLog() });
+// Transaction history — requires ?wallet=<accountIdOrEvmAddress>
+app.get('/api/transactions', async (req, res) => {
+  const { wallet } = req.query;
+
+  if (!wallet) {
+    return res.json({ success: true, data: [] });
+  }
+
+  try {
+    const txns = await fetchWalletTransactions(wallet, 25);
+    res.json({ success: true, data: txns });
+  } catch (err) {
+    console.error('[API] /api/transactions error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // Agent state
@@ -70,16 +103,22 @@ app.get('/api/agent/state', (_, res) => {
   res.json({ success: true, data: getAgentState() });
 });
 
-// Trigger manual AI analysis
-app.post('/api/agent/analyze', async (_, res) => {
+// Trigger manual AI analysis — requires ?wallet=<accountIdOrEvmAddress>
+app.post('/api/agent/analyze', async (req, res) => {
+  const wallet = req.query.wallet || req.body.wallet;
   try {
     const [market, sentiment] = await Promise.all([fetchHBARData(), fetchSentimentData()]);
-    const vaults = generateVaultData();
     latestMarketData = market;
     latestSentimentData = sentiment;
-    latestVaultData = vaults;
 
-    const decision = await analyzeAndDecide(market, sentiment, vaults);
+    // Get real vault data for the connected wallet  
+    let vaultData = { vaults: [] };
+    if (wallet) {
+      vaultData = await fetchWalletVaultPositions(wallet, market.price);
+      walletVaultCache.set(wallet, { data: vaultData, ts: Date.now() });
+    }
+
+    const decision = await analyzeAndDecide(market, sentiment, vaultData);
     broadcast('DECISION', decision);
     broadcast('MARKET_UPDATE', market);
     res.json({ success: true, data: decision });
@@ -94,27 +133,6 @@ app.post('/api/agent/toggle', (req, res) => {
   setAgentRunning(running);
   broadcast('AGENT_STATUS', { isRunning: running });
   res.json({ success: true, isRunning: running });
-});
-
-// Simulate market scenario
-app.post('/api/simulate', async (req, res) => {
-  try {
-    const { scenario } = req.body; // 'high_volatility', 'bearish', 'bullish', 'low_volatility'
-    const market = buildSimulatedMarket(scenario);
-    const sentiment = buildSimulatedSentiment(scenario);
-    const vaults = generateVaultData();
-    latestMarketData = market;
-    latestSentimentData = sentiment;
-    latestVaultData = vaults;
-
-    const decision = await analyzeAndDecide(market, sentiment, vaults);
-    broadcast('DECISION', decision);
-    broadcast('MARKET_UPDATE', market);
-    broadcast('SIMULATION', { scenario, active: true });
-    res.json({ success: true, data: { decision, market, sentiment } });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
 });
 
 // Chat with AI agent
@@ -132,9 +150,7 @@ app.post('/api/agent/chat', async (req, res) => {
 // ─── WebSocket ────────────────────────────────────────────────────────────────
 wss.on('connection', (ws) => {
   console.log('[WS] Client connected');
-  // Send initial state
   if (latestMarketData) ws.send(JSON.stringify({ type: 'MARKET_UPDATE', data: latestMarketData }));
-  if (latestVaultData) ws.send(JSON.stringify({ type: 'VAULT_UPDATE', data: latestVaultData }));
   ws.send(JSON.stringify({ type: 'AGENT_STATUS', data: getAgentState() }));
   ws.on('close', () => console.log('[WS] Client disconnected'));
 });
@@ -157,8 +173,8 @@ cron.schedule('*/5 * * * *', async () => {
   try {
     const market = latestMarketData || (await fetchHBARData());
     const sentiment = latestSentimentData || (await fetchSentimentData());
-    const vaults = generateVaultData();
-    const decision = await analyzeAndDecide(market, sentiment, vaults);
+    // Auto-agent uses empty vault data if no wallet is known to server
+    const decision = await analyzeAndDecide(market, sentiment, { vaults: [] });
     broadcast('DECISION', decision);
     console.log('[Agent] Auto-analysis complete:', decision.actionType);
   } catch (err) {
@@ -166,47 +182,12 @@ cron.schedule('*/5 * * * *', async () => {
   }
 });
 
-// ─── Simulation Helpers ────────────────────────────────────────────────────────
-function buildSimulatedMarket(scenario) {
-  const base = { price: 0.089, change24h: 0, volume24h: 45000000, marketCap: 3200000000 };
-  const history = Array.from({ length: 24 }, (_, i) => ({
-    time: new Date(Date.now() - (23 - i) * 3600000).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-    price: 0,
-  }));
-
-  switch (scenario) {
-    case 'high_volatility':
-      history.forEach((h, i) => { h.price = parseFloat((0.089 + Math.sin(i) * 0.015).toFixed(5)); });
-      return { ...base, price: 0.082, change24h: -8.5, volatility: 7.2, volatilityLevel: 'HIGH', priceHistory: history, simulated: true };
-    case 'bearish':
-      history.forEach((h, i) => { h.price = parseFloat((0.095 - i * 0.0004).toFixed(5)); });
-      return { ...base, price: 0.076, change24h: -14.2, volatility: 6.8, volatilityLevel: 'HIGH', priceHistory: history, simulated: true };
-    case 'bullish':
-      history.forEach((h, i) => { h.price = parseFloat((0.079 + i * 0.0005).toFixed(5)); });
-      return { ...base, price: 0.109, change24h: 22.4, volatility: 3.1, volatilityLevel: 'MEDIUM', priceHistory: history, simulated: true };
-    case 'low_volatility':
-    default:
-      history.forEach((h, i) => { h.price = parseFloat((0.089 + (Math.random() - 0.5) * 0.001).toFixed(5)); });
-      return { ...base, price: 0.089, change24h: 0.4, volatility: 0.8, volatilityLevel: 'LOW', priceHistory: history, simulated: true };
-  }
-}
-
-function buildSimulatedSentiment(scenario) {
-  switch (scenario) {
-    case 'bearish': return { score: -0.72, label: 'BEARISH', positive: 2, negative: 18, neutral: 4, simulated: true };
-    case 'bullish': return { score: 0.68, label: 'BULLISH', positive: 17, negative: 2, neutral: 5, simulated: true };
-    case 'high_volatility': return { score: -0.3, label: 'BEARISH', positive: 5, negative: 12, neutral: 7, simulated: true };
-    default: return { score: 0.05, label: 'NEUTRAL', positive: 8, negative: 6, neutral: 10, simulated: true };
-  }
-}
-
 // ─── Start Server ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
   console.log(`\n🤖 AI Vault Guardian Backend running on port ${PORT}`);
   console.log(`📡 WebSocket server ready`);
   console.log(`🔗 API: http://localhost:${PORT}/api\n`);
-  // Initial data fetch
   fetchHBARData().then((d) => { latestMarketData = d; broadcast('MARKET_UPDATE', d); }).catch(() => {});
   fetchSentimentData().then((d) => { latestSentimentData = d; }).catch(() => {});
 });

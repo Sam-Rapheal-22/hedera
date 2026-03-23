@@ -304,11 +304,11 @@ const PrismaticBurst = ({
     };
 
     let ro: any = null;
-    if ('ResizeObserver' in window) {
+    if (typeof ResizeObserver !== 'undefined') {
       ro = new ResizeObserver(resize);
       ro.observe(container);
     } else {
-      window.addEventListener('resize', resize);
+      globalThis.addEventListener('resize', resize);
     }
     resize();
 
@@ -321,7 +321,7 @@ const PrismaticBurst = ({
     container.addEventListener('pointermove', onPointer, { passive: true });
 
     let io: any = null;
-    if ('IntersectionObserver' in window) {
+    if (typeof IntersectionObserver !== 'undefined') {
       io = new IntersectionObserver(
         entries => {
           if (entries[0]) {
@@ -370,7 +370,7 @@ const PrismaticBurst = ({
       cancelAnimationFrame(raf);
       container.removeEventListener('pointermove', onPointer);
       ro?.disconnect();
-      if (!ro) window.removeEventListener('resize', resize);
+      if (!ro) globalThis.removeEventListener('resize', resize);
       io?.disconnect();
       document.removeEventListener('visibilitychange', onVis);
       try {

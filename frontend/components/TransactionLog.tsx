@@ -1,13 +1,22 @@
 "use client";
+import { RefreshCw } from "lucide-react";
 
-const TYPE_COLOR: Record<string, string> = {
-  HARVEST: "badge-green",
-  REBALANCE: "badge-blue",
-  WITHDRAW: "badge-red",
-  DEPOSIT: "badge-yellow",
-};
+export default function TransactionLog({ transactions, loadingWalletData }: any) {
+  if (loadingWalletData) {
+    return (
+      <div className="card">
+        <div className="section-title mb-3">
+          <span className="icon">⛓</span>
+          Transaction History
+        </div>
+        <div style={{ textAlign: "center", padding: "32px 20px", color: "#4a5580" }}>
+          <RefreshCw size={24} style={{ animation: "spin 1s linear infinite", marginBottom: 10 }} />
+          <div>Fetching on-chain transactions…</div>
+        </div>
+      </div>
+    );
+  }
 
-export default function TransactionLog({ transactions }: any) {
   if (!transactions?.length) {
     return (
       <div className="card">
@@ -17,7 +26,7 @@ export default function TransactionLog({ transactions }: any) {
         </div>
         <div style={{ textAlign: "center", padding: "32px 20px", color: "#4a5580" }}>
           <div style={{ fontSize: 28, marginBottom: 10 }}>⛓</div>
-          <div>No transactions yet — run an analysis to execute vault actions</div>
+          <div>No transactions found. Connect your wallet to see your on-chain history.</div>
         </div>
       </div>
     );
@@ -37,35 +46,48 @@ export default function TransactionLog({ transactions }: any) {
           <thead>
             <tr>
               <th>Type</th>
-              <th>Vault</th>
               <th>Tx ID</th>
-              <th>Gas</th>
+              <th>Fee (ℏ)</th>
               <th>Status</th>
               <th>Time</th>
               <th>Explorer</th>
             </tr>
           </thead>
           <tbody>
-            {transactions.slice(0, 15).map((tx: any, i: number) => (
-              <tr key={i}>
-                <td><span className={`badge ${TYPE_COLOR[tx.type] || "badge-purple"}`}>{tx.type}</span></td>
-                <td style={{ color: "#f0f0ff", fontWeight: 500 }}>{tx.vaultId || "—"}</td>
-                <td className="tx-hash">{tx.id?.slice(0, 24) || "—"}…</td>
-                <td style={{ fontFamily: "var(--font-mono)", color: "#8892b0" }}>{tx.gasUsed} ℏ</td>
-                <td>
-                  <span className={`badge ${tx.status === "SUCCESS" ? "badge-green" : "badge-red"}`}>
-                    {tx.status === "SUCCESS" ? "✓" : "✗"} {tx.status}
-                  </span>
-                </td>
-                <td style={{ color: "#4a5580", fontSize: 12 }}>{new Date(tx.timestamp).toLocaleTimeString()}</td>
-                <td>
-                  <a href={tx.explorerUrl} target="_blank" rel="noopener noreferrer"
-                    style={{ fontSize: 11, color: "var(--accent-secondary)", textDecoration: "none" }}>
-                    View ↗
-                  </a>
-                </td>
-              </tr>
-            ))}
+            {transactions.slice(0, 20).map((tx: any, i: number) => {
+              const txType = (tx.type || "CRYPTOTRANSFER").replace("CRYPTO", "").replace("TOKEN", "TKN ");
+              return (
+                <tr key={tx.id || i}>
+                  <td>
+                    <span className="badge badge-blue" style={{ fontSize: 10 }}>
+                      {txType.slice(0, 14)}
+                    </span>
+                  </td>
+                  <td className="tx-hash" title={tx.id}>
+                    {tx.id ? `${tx.id.slice(0, 20)}…` : "—"}
+                  </td>
+                  <td style={{ fontFamily: "var(--font-mono)", color: "#8892b0" }}>
+                    {tx.chargedFee ?? tx.gasUsed ?? "—"}
+                  </td>
+                  <td>
+                    <span className={`badge ${tx.status === "SUCCESS" ? "badge-green" : "badge-red"}`}>
+                      {tx.status === "SUCCESS" ? "✓" : "✗"} {tx.status}
+                    </span>
+                  </td>
+                  <td style={{ color: "#4a5580", fontSize: 12 }}>
+                    {tx.timestamp ? new Date(tx.timestamp).toLocaleTimeString() : "—"}
+                  </td>
+                  <td>
+                    {tx.explorerUrl ? (
+                      <a href={tx.explorerUrl} target="_blank" rel="noopener noreferrer"
+                        style={{ fontSize: 11, color: "var(--accent-secondary)", textDecoration: "none" }}>
+                        View ↗
+                      </a>
+                    ) : "—"}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

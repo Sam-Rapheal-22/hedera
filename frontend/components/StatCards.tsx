@@ -8,19 +8,7 @@ function fmt(n: number, prefix = "$") {
   return `${prefix}${n.toFixed(2)}`;
 }
 
-function Stat({ label, value, sub, subClass }: any) {
-  return (
-    <div className="stat-card animate-fade-up">
-      <div className="stat-label">{label}</div>
-      <div className="stat-value">{value ?? "—"}</div>
-      {sub && <div className={`stat-change ${subClass || "neutral"}`}>{sub}</div>}
-    </div>
-  );
-}
-
-export default function StatCards({ market, vaults, agentState }: any) {
-  const totalTVL = vaults?.reduce((s: number, v: any) => s + (v.tvl || 0), 0) || 0;
-  const totalRewards = vaults?.reduce((s: number, v: any) => s + (v.pendingRewards || 0), 0) || 0;
+export default function StatCards({ market, vaults, agentState, walletInfo }: any) {
   const decisions = agentState?.decisionHistory?.length || 0;
   const change = market?.change24h ?? 0;
 
@@ -28,8 +16,15 @@ export default function StatCards({ market, vaults, agentState }: any) {
   const volLevel = market?.volatilityLevel || "LOW";
   const activeCount = volLevel === "HIGH" ? 7 : volLevel === "MEDIUM" ? 4 : 2;
 
+  // Real wallet totals
+  const hbarBalance = walletInfo?.hbar ?? null;
+  const tokenCount = walletInfo?.tokenCount ?? null;
+  // USD value of HBAR holdings
+  const hbarUsd = hbarBalance != null && market?.price ? hbarBalance * market.price : null;
+
   return (
     <div className="stat-grid" style={{ marginBottom: 20 }}>
+      {/* HBAR Price */}
       <div className="stat-card animate-fade-up" style={{ animationDelay: "0s" }}>
         <div className="stat-label">HBAR Price</div>
         <div className="stat-value" style={{ fontSize: 22 }}>
@@ -40,20 +35,35 @@ export default function StatCards({ market, vaults, agentState }: any) {
         </div>
       </div>
 
+      {/* HBAR Balance */}
       <div className="stat-card animate-fade-up" style={{ animationDelay: "0.08s" }}>
-        <div className="stat-label">Total TVL</div>
-        <div className="stat-value" style={{ fontSize: 22 }}>{fmt(totalTVL)}</div>
-        <div className="stat-change neutral">Across {vaults?.length || 0} vaults</div>
-      </div>
-
-      <div className="stat-card animate-fade-up" style={{ animationDelay: "0.16s" }}>
-        <div className="stat-label">Pending Rewards</div>
-        <div className="stat-value" style={{ fontSize: 22, color: "var(--accent-green)" }}>
-          {fmt(totalRewards)}
+        <div className="stat-label">HBAR Balance</div>
+        <div className="stat-value" style={{ fontSize: 22 }}>
+          {hbarBalance != null
+            ? `${hbarBalance.toLocaleString(undefined, { maximumFractionDigits: 4 })} ℏ`
+            : "—"}
         </div>
-        <div className="stat-change positive">Ready to harvest</div>
+        <div className="stat-change neutral">
+          {hbarUsd != null
+            ? `≈ ${fmt(hbarUsd)} USD`
+            : walletInfo
+              ? "No HBAR"
+              : "Connect wallet"}
+        </div>
       </div>
 
+      {/* Token Holdings */}
+      <div className="stat-card animate-fade-up" style={{ animationDelay: "0.16s" }}>
+        <div className="stat-label">Token Holdings</div>
+        <div className="stat-value" style={{ fontSize: 22, color: "var(--accent-green)" }}>
+          {tokenCount != null ? tokenCount : "—"}
+        </div>
+        <div className="stat-change neutral">
+          {vaults?.length ? `${vaults.length} asset${vaults.length !== 1 ? "s" : ""} on-chain` : "Connect wallet"}
+        </div>
+      </div>
+
+      {/* Volatility */}
       <div className="stat-card animate-fade-up" style={{ animationDelay: "0.24s" }}>
         <div className="stat-label">Volatility</div>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 4, marginTop: 8 }}>

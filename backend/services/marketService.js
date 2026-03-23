@@ -108,7 +108,7 @@ export async function fetchSentimentData() {
   }
 }
 
-// Simulated data fallback (for demo when APIs are rate-limited)
+// CoinGecko rate-limit fallback — last-resort cached estimate
 function generateSimulatedHBARData() {
   const basePrice = 0.085 + Math.random() * 0.02;
   const volatility = Math.random() * 8;
@@ -131,7 +131,7 @@ function generateSimulatedHBARData() {
     volatility,
     volatilityLevel: volatility < 2 ? 'LOW' : volatility < 5 ? 'MEDIUM' : 'HIGH',
     priceHistory: history,
-    simulated: true,
+    rateLimited: true,
   };
 }
 
@@ -144,41 +144,8 @@ function generateSimulatedSentiment() {
     negative: Math.floor(Math.random() * 10),
     neutral: Math.floor(Math.random() * 8),
     articles: [],
-    simulated: true,
+    rateLimited: true,
   };
 }
 
-// Simulate DeFi vault data
-export function generateVaultData() {
-  const apy = 12 + Math.random() * 8;
-  const tvl = 500000 + Math.random() * 200000;
-  const pendingRewards = 1200 + Math.random() * 800;
-  return {
-    vaults: [
-      {
-        id: 'hbar-usdc',
-        name: 'HBAR/USDC',
-        protocol: 'Bonzo Finance',
-        tvl,
-        apy,
-        pendingRewards,
-        liquidityRange: { lower: 0.072, upper: 0.11 },
-        inRange: Math.random() > 0.3,
-        utilizationRate: 0.6 + Math.random() * 0.3,
-        totalHarvested: 8450 + Math.random() * 1000,
-      },
-      {
-        id: 'hbar-eth',
-        name: 'HBAR/ETH',
-        protocol: 'Bonzo Finance',
-        tvl: tvl * 0.6,
-        apy: apy * 0.9,
-        pendingRewards: pendingRewards * 0.7,
-        liquidityRange: { lower: 0.000031, upper: 0.000048 },
-        inRange: Math.random() > 0.4,
-        utilizationRate: 0.5 + Math.random() * 0.3,
-        totalHarvested: 5200 + Math.random() * 500,
-      },
-    ],
-  };
-}
+// generateVaultData removed — vault data now comes from the Hedera Mirror Node
