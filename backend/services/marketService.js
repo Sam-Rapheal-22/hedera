@@ -1,10 +1,37 @@
 // Market Data Service - fetches HBAR price, volatility, and sentiment
 import axios from 'axios';
 
-const COINGECKO_BASE = 'https://api.coingecko.com/api/v3';
+const COINGECKO_BASE = process.env.COINGECKO_API || 'https://api.coingecko.com/api/v3';
+const HBAR_CACHE_TTL_MS = Number(process.env.MARKET_CACHE_TTL_MS || 60_000);
+const COINGECKO_BACKOFF_MS = Number(process.env.COINGECKO_BACKOFF_MS || 5 * 60_000);
+
+let lastHBARData = null;
+let lastHBARFetchAt = 0;
+let coingeckoBackoffUntil = 0;
+
+function getFallbackHBARData() {
+  if (lastHBARData) {
+    return {
+      ...lastHBARData,
+      stale: true,
+      rateLimited: true,
+    };
+  }
+  return generateSimulatedHBARData();
+}
 
 // Fetch HBAR price history and compute volatility
 export async function fetchHBARData() {
+  const now = Date.now();
+
+  if (lastHBARData && now - lastHBARFetchAt < HBAR_CACHE_TTL_MS) {
+    return lastHBARData;
+  }
+
+  if (coingeckoBackoffUntil > now) {
+    return getFallbackHBARData();
+  }
+
   try {
     const [priceRes, marketRes] = await Promise.all([
       axios.get(`${COINGECKO_BASE}/simple/price`, {
@@ -32,7 +59,7 @@ export async function fetchHBARData() {
     const stdDev = Math.sqrt(variance);
     const volatilityPct = (stdDev / mean) * 100;
 
-    return {
+    const payload = {
       price: data.usd,
       change24h: data.usd_24h_change,
       volume24h: data.usd_24h_vol,
@@ -44,10 +71,22 @@ export async function fetchHBARData() {
         price: parseFloat(price.toFixed(5)),
       })),
     };
+
+    lastHBARData = payload;
+    lastHBARFetchAt = Date.now();
+    coingeckoBackoffUntil = 0;
+
+    return payload;
   } catch (err) {
-    console.error('[MarketService] CoinGecko error:', err.message);
-    // Return simulated data if API is rate-limited
-    return generateSimulatedHBARData();
+    const status = err?.response?.status;
+    if (status === 429) {
+      coingeckoBackoffUntil = Date.now() + COINGECKO_BACKOFF_MS;
+      console.warn(`[MarketService] CoinGecko rate-limited (429). Backing off for ${Math.round(COINGECKO_BACKOFF_MS / 1000)}s.`);
+    } else {
+      console.error('[MarketService] CoinGecko error:', err.message);
+    }
+
+    return getFallbackHBARData();
   }
 }
 
