@@ -12,8 +12,8 @@ import SentimentPanel from "@/components/SentimentPanel";
 import ToastContainer from "@/components/ToastContainer";
 import LandingPage from "@/components/LandingPage";
 
-const API = "http://localhost:4000";
-const WS_URL = "ws://localhost:4000";
+const API = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:4000").replace(/\/$/, "");
+const WS_URL = (process.env.NEXT_PUBLIC_WS_URL || API.replace(/^http/i, "ws")).replace(/\/$/, "");
 
 const appMetadata = {
   name: "AI Vault Guardian",
